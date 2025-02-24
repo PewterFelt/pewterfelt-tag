@@ -1,9 +1,7 @@
 from typing import TypedDict
 
-from crawl4ai import AsyncWebCrawler, CrawlResult
-from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 from flask import Flask, request
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import GoogleGenerativeAI
 
 PROMPT_TEMPLATE = """
@@ -38,20 +36,10 @@ Return only a comma-separated list of tags with no additional formatting or expl
 
 
 class TagRequest(TypedDict):
-    url: str
+    content: str
 
 
-async def crawl_content(url: str):
-    browser_config = BrowserConfig()
-    run_config = CrawlerRunConfig()
-
-    async with AsyncWebCrawler(config=browser_config) as crawler:
-        result = await crawler.arun(url=url, config=run_config)
-
-        return result
-
-
-def tag_content(content: CrawlResult):
+def tag_content(content: str):
     prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     prompt = prompt_template.format(content=content)
 
@@ -66,19 +54,14 @@ app = Flask(__name__)
 @app.route("/api/tag", methods=["POST"])
 async def tag():
     data: TagRequest = request.get_json()
-    if not data or "url" not in data:
-        return {"error": "Missing URL in request body"}, 400  # pyright: ignore[reportUnreachable]
+    if not data or "content" not in data:
+        return {"error": "Missing content in request body"}, 400  # pyright: ignore[reportUnreachable]
 
-    url = data["url"]
-
-    try:
-        content = await crawl_content(url)
-    except Exception:
-        return {"error": "Failed to crawl URL"}, 500
+    content = data["content"]
 
     try:
         tags = tag_content(content)
     except Exception:
         return {"error": "Failed to tag content"}, 500
 
-    return {"content": str(tags)}
+    return {"tags": str(tags)}
