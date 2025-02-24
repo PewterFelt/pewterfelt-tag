@@ -6,9 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "crawl4ai>=0.4.248",
-    "flask>=3.1.0",
+    "flask[async]>=3.1.0",
+    "langchain-community>=0.3.18",
 ]
 
 [tool.basedpyright]
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
+reportAny = false
