@@ -1,34 +1,63 @@
 from typing import TypedDict
 
-from crawl4ai import AsyncWebCrawler
+from crawl4ai import AsyncWebCrawler, CrawlResult
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 from flask import Flask, request
-from langchain_community.llms.ollama import Ollama
 from langchain.prompts import ChatPromptTemplate
+from langchain_google_genai import GoogleGenerativeAI
 
 PROMPT_TEMPLATE = """
 {content}
 
----
+* * *
 
-Based on the previously given content give me a comma separated list of up to five most relevant tags you think best describe it.
+Analyze the content and generate up to five relevant tags that best represent its core topics. Follow these guidelines:
 
----
+1. Prioritize specific terms over general ones
+2. Use lower case with spaces (e.g., "machine learning")
+3. Use uppercase without dots for acronyms (e.g., "UI", "CLI", "AI", "ETF")
+4. Have no spaces around the commas, only for compound meanings (e.g., "machine learning", "web development", "climate change")
+4. Maximum 5 tags, minimum 2
 
-Here's some examples:
+* * *
 
-If the content is about Neovim, you could tag it like `CLI,Tech,Lua,Neovim`.
-If the content is a recipe, you could tag it like `Cooking,Recipe`.
+Examples:
+- Neovim configuration guide → `CLI,tech,lua,neovim,IDE`
+- Python web development tutorial → `python,web development,backend,programming,tech`
+- Healthy meal recipe → `cooking,recipe,nutrition,healthy eating`
+- React performance optimization → `web development,react,javascript`
+- Climate change analysis → `environment,science,climate change,sustainability`
+- Personal finance tips → `finance,personal finance,money management,investing`
+- Machine learning fundamentals → `AI,machine learning,data science,mathematics`
+- Travel guide to Japan → `travel,japan,culture,tourism`
 
----
+* * *
 
-Now return the list with no extra text, just the comma separated tags.
+Return only a comma-separated list of tags with no additional formatting or explanation.
 """
 
 
-# Define the expected request body structure
 class TagRequest(TypedDict):
     url: str
+
+
+async def crawl_content(url: str):
+    browser_config = BrowserConfig()
+    run_config = CrawlerRunConfig()
+
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        result = await crawler.arun(url=url, config=run_config)
+
+        return result
+
+
+def tag_content(content: CrawlResult):
+    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+    prompt = prompt_template.format(content=content)
+
+    model = GoogleGenerativeAI(model="gemini-2.0-flash-exp")
+
+    return model.invoke(prompt)
 
 
 app = Flask(__name__)
@@ -36,26 +65,20 @@ app = Flask(__name__)
 
 @app.route("/api/tag", methods=["POST"])
 async def tag():
-    # Get URL from request body
     data: TagRequest = request.get_json()
     if not data or "url" not in data:
         return {"error": "Missing URL in request body"}, 400  # pyright: ignore[reportUnreachable]
 
     url = data["url"]
-    browser_config = BrowserConfig()
-    run_config = CrawlerRunConfig()
 
     try:
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            result = await crawler.arun(url=url, config=run_config)
+        content = await crawl_content(url)
+    except Exception:
+        return {"error": "Failed to crawl URL"}, 500
 
-            prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-            prompt = prompt_template.format(content=result)
+    try:
+        tags = tag_content(content)
+    except Exception:
+        return {"error": "Failed to tag content"}, 500
 
-            model = Ollama(model="llama3.2")
-            response = model.invoke(prompt)
-
-            return {"content": str(response)}
-
-    except:
-        return {"error": "error"}, 500
+    return {"content": str(tags)}
